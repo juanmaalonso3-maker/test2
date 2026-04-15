@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Calculadora Canton Fair v14</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+  .fade-in { animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
+
+/* ── STORAGE KEYS ──────────────────────────────────────── */
+const PARAMS_KEY = 'cf_params_v6';
+const COTIZ_KEY  = 'cf_cotizaciones_v1';
+
+/* ── DEFAULT PARAMS ────────────────────────────────────── */
+const DEFAULT_PARAMS = {
+  tipoCambio: 1190, subfacturarPct: 20, seguroFlat: 162, gastosEXW: 400,
+  // FCL
+  fleteFCL: 1500,
+  terminalPortuariaFCL: 2800,
+  honorariosFCL: 200,
+  transporteNacFCL: 500,
+  bunkerFAFBAF: 0,
+  manejoDocFCL: 0,
+  thcFCL: 0,
+  tollFCL: 0,
+  handlingFCL: 0,
+  docFeeFCL: 0,
+  // LCL flete
+  costoCBM: 50,
+  // LCL gastos locales (base s/IVA, se aplica +21%)
+  manejoDocLCL: 50,
+  agpLCL: 4,
+  desconsolidacionLCL: 250,
+  simLCL: 25,
+  logFeeLCL: 45,
+  // LCL otros
+  depositoFiscalLCL: 880,
+  verificacionIncluidaLCL: true,
+  costoVerificacionLCL: 0,
+  honorariosLCL: 200,
+  transporteNacLCL: 0,
+  // Aranceles
+  diePct: 20, tePct: 3, ivaImportPct: 21, ivaAdicionalPct: 20,
+  percIIGGpct: 6, percIIBBpct: 2.5,
+  // ML comisiones
+  mlComisionPct: 14.5,
+  mlPublicidadPct: 3,
+  mlIIBBpct: 5,
+  mlVariosPct: 2,
+  mlImpDebCredPct: 1.2,
+  // Cuotas
+  cuotas3CostoReal: 9.40,
+  cuotas6CostoReal: 15.10,
+  cuotas9CostoReal: 20.70,
+  cuotas12CostoReal: 25.90,
+  cuotasTrasladoAdicional: 0,
+};
+
+/* ── ML SHIPPING TABLES ────────────────────────────────── */
+const ML_ENVIO_CHICO = [
+  { max: 0.3,  c: [1230, 2455, 2925] },
+  { max: 0.5,  c: [1240, 2465, 2925] },
+  { max: 1,    c: [1255, 2465, 2940] },
+  { max: 1.5,  c: [1265, 2490, 2950] },
+  { max: 2,    c: [1275, 2500, 2965] },
+  { max: 3,    c: [1290, 2575, 3050] },
+  { max: 4,    c: [1310, 2620, 3100] },
+  { max: 5,    c: [1365, 2735, 3240] },
+  { max: 8,    c: [1395, 2790, 3305] },
+  { max: 10,   c: [1420, 2850, 3445] },
+  { max: 13,   c: [1450, 2850, 3510] },
+  { max: 15,   c: [1470, 2920, 3510] },
+  { max: 20,   c: [1470, 2965, 3570] },
+];
+/* ── ML ENVIO GRATIS TABLE (optional free shipping for < $33k) ── */
+const ML_ENVIO_GRATIS = [
+  { max: 0.3,  c: 7868/1.21 },
+  { max: 0.5,  c: 8596/1.21 },
+  { max: 1,    c: 9800/1.21 },
+  { max: 1.5,  c: 10122/1.21 },
+  { max: 2,    c: 10458/1.21 },
+  { max: 3,    c: 11550/1.21 },
+  { max: 4,    c: 12866/1.21 },
+  { max: 5,    c: 14070/1.21 },
+  { max: 8,    c: 15512/1.21 },
+  { max: 10,   c: 16926/1.21 },
+  { max: 13,   c: 18270/1.21 },
+  { max: 15,   c: 19684/1.21 },
+  { max: 20,   c: 23506/1.21 },
+];
+
+const ML_ENVIO_GRANDE = [
+  { max: 0.3,  c: [5620/1.21,  6080/1.21] },
+  { max: 0.5,  c: [6140/1.21,  6600/1.21] },
+  { max: 1,    c: [7000/1.21,  7470/1.21] },
+  { max: 1.5,  c: [7230/1.21,  7720/1.21] },
+  { max: 2,    c: [7470/1.21,  7970/1.21] },
+  { max: 3,    c: [8250/1.21,  8710/1.21] },
+  { max: 4,    c: [9190/1.21,  9860/1.21] },
+  { max: 5,    c: [10050/1.21, 10760/1.21] },
+  { max: 8,    c: [11080/1.21, 11830/1.21] },
+  { max: 10,   c: [12090/1.21, 12840/1.21] },
+  { max: 13,   c: [13050/1.21, 13920/1.21] },
+  { max: 15,   c: [14060/1.21, 14930/1.21] },
+  { max: 20,   c: [16790/1.21, 17830/1.21] },
+];
+
+function calcEnvioML(pvpCIVA, pesoReal, pesoVol, envioGratis=false) {
+  const pesoMax = Math.max(pesoReal || 0, pesoVol || 0);
+  if (pvpCIVA < 33000) {
+    if (envioGratis) {
+      // Seller offers free shipping on item < $33k — uses gratis table
+      const pesoForTable = Math.min(pesoMax <= 0 ? 0.3 : pesoMax, 20);
+      const row = ML_ENVIO_GRATIS.find(r => pesoForTable <= r.max) || ML_ENVIO_GRATIS[ML_ENVIO_GRATIS.length - 1];
+      return { j: 0, k: row.c, envioGratisActivo: true };
+    }
+    const idx = pvpCIVA < 16000 ? 0 : pvpCIVA < 24000 ? 1 : 2;
+    const row = ML_ENVIO_CHICO.find(r => pesoMax <= r.max) || ML_ENVIO_CHICO[ML_ENVIO_CHICO.length - 1];
+    return { j: row.c[idx], k: 0, envioGratisActivo: false };
+  } else {
+    const idx = pvpCIVA < 50000 ? 0 : 1;
+    const pesoForTable = Math.min(pesoMax, 20);
+    const row = ML_ENVIO_GRANDE.find(r => pesoForTable <= r.max) || ML_ENVIO_GRANDE[ML_ENVIO_GRANDE.length - 1];
+    return { j: 0, k: row.c[idx], envioGratisActivo: false };
+  }
+}
+
+/* ── BREAKEVEN ─────────────────────────────────────────── */
+function calcBreakevens(costoUnitARS, pesoReal, pesoVol, costosFijosMLpct, cuotaRealPct=0, impDebCredPct=1.2) {
+  if (!costoUnitARS || costoUnitARS <= 0) return null;
+  const cfRate = (costosFijosMLpct || 24.5) / 100;
+  const cuotaRate = (cuotaRealPct || 0) / 100;
+  const dcRate = (impDebCredPct || 0) / 100;
+  const pesoMax = Math.max(pesoReal || 0, pesoVol || 0);
+  const pesoForTable = Math.min(pesoMax <= 0 ? 0.3 : pesoMax, 20);
+  const rowChico = ML_ENVIO_CHICO.find(r => pesoForTable <= r.max) || ML_ENVIO_CHICO[ML_ENVIO_CHICO.length - 1];
+  const subBrackets = [
+    { idx: 2, min: 24000, max: 32999 },
+    { idx: 1, min: 16000, max: 23999 },
+    { idx: 0, min: 0,     max: 15999 },
+  ];
+  // breakeven: pvpSIVA - cf - j - cuotaCost - impDC - costo = 0
+  // pvpCIVA * ((1-cfRate)/1.21 - cuotaRate - dcRate) = j + costo
+  const denomBase = (1 - cfRate) / 1.21 - cuotaRate - dcRate;
+  let be_bajo33 = null;
+  if (denomBase > 0) {
+    for (const sb of subBrackets) {
+      const j = rowChico.c[sb.idx];
+      const pvpCIVA_be = (j + costoUnitARS) / denomBase;
+      if (pvpCIVA_be >= sb.min && pvpCIVA_be <= sb.max) {
+        be_bajo33 = pvpCIVA_be;
+        break;
+      }
+    }
+  }
+  const rowLarge = ML_ENVIO_GRANDE.find(r => pesoForTable <= r.max) || ML_ENVIO_GRANDE[ML_ENVIO_GRANDE.length - 1];
+  const largeBrackets = [
+    { idx: 0, min: 33000, max: 49999 },
+    { idx: 1, min: 50000, max: Infinity },
+  ];
+  let be_sobre33 = null;
+  if (denomBase > 0) {
+    for (const lb of largeBrackets) {
+      const k = rowLarge.c[lb.idx];
+      const pvpCIVA_be = (k + costoUnitARS) / denomBase;
+      if (pvpCIVA_be >= lb.min && (pvpCIVA_be <= lb.max || lb.max === Infinity)) {
+        be_sobre33 = pvpCIVA_be;
+        break;
+      }
+    }
+    if (be_sobre33 === null) {
+      const k = rowLarge.c[1];
+      be_sobre33 = Math.max(50000, (k + costoUnitARS) / denomBase);
+    }
+  }
+  return { be_bajo33, be_sobre33 };
+}
+
+/* ── ML ALL BRACKETS ───────────────────────────────────── */
+function calcMLAllBrackets(costoSIVA, pesoReal, pesoVol, costosFijosMLpct, cuotaRealPct=0, me1Price=0, envioGratis=false, impDebCredPct=1.2) {
+  if (!costoSIVA || costoSIVA <= 0) return [];
+  const cfPct = costosFijosMLpct || 24.5;
+  const dcRate = (impDebCredPct || 0) / 100;
+  const useME1 = me1Price > 0;
+  const points = [
+    { pvpCIVA: 15999,  label: '< $16.000',              buyerShipping: true  },
+    { pvpCIVA: 23999,  label: '$16.000 – $23.999',      buyerShipping: true  },
+    { pvpCIVA: 32999,  label: '$24.000 – $32.999',      buyerShipping: true  },
+    { pvpCIVA: 49999,  label: '$33.000 – $49.999',      buyerShipping: false },
+    { pvpCIVA: 60000,  label: '≥ $50.000 (ej. $60k)',   buyerShipping: false },
+    { pvpCIVA: 80000,  label: '≥ $50.000 (ej. $80k)',   buyerShipping: false },
+    { pvpCIVA: 100000, label: '≥ $50.000 (ej. $100k)',  buyerShipping: false },
+  ];
+  return points.map(({ pvpCIVA, label, buyerShipping }) => {
+    const pvpSIVA = pvpCIVA / 1.21;
+    const envRes = useME1
+      ? { j: 0, k: me1Price, envioGratisActivo: false }
+      : calcEnvioML(pvpCIVA, pesoReal, pesoVol, buyerShipping && envioGratis);
+    const { j, k, envioGratisActivo } = envRes;
+    const bShip = useME1 ? false : (envioGratisActivo ? false : buyerShipping);
+    const cf = pvpSIVA * (cfPct / 100);
+    const cuotaCost = pvpCIVA * (cuotaRealPct / 100);
+    const impDC = pvpCIVA * dcRate;
+    const ganancia = pvpSIVA - k - cf - j - cuotaCost - impDC - costoSIVA;
+    const margen = pvpSIVA > 0 ? ganancia / pvpSIVA : -Infinity;
+    return { pvpCIVA, pvpSIVA, label, j, k, cf, ganancia, margen, buyerShipping: bShip, envioGratisActivo, impDC };
+  });
+}
+
+/* ── COTIZADOR INVERSO ─────────────────────────────────── */
+function calcFOBInverso(p, cantidadVal, tipoEmbarqueVal, cbmVal, pesoCargaTotalVal,
+                        pvpCIVA, targetMarginPct, pesoRealKg, pesoVolKg, cuotaRealPct, mlCFpct) {
+  const tc = pv(p.tipoCambio, 1190);
+  const cantidad = Math.max(1, pv(cantidadVal) || 1);
+  const subfPct = pv(p.subfacturarPct, 0);
+  const subfFactor = 1 - subfPct / 100;
+  const arancel = (pv(p.diePct) + pv(p.tePct)) / 100;
+
+  let G = 0, fleteUSD = 0, bunkerPorUnidad = 0;
+  const seguro = pv(p.seguroFlat) / cantidad;
+
+  if (tipoEmbarqueVal === 'FCL') {
+    bunkerPorUnidad = pv(p.bunkerFAFBAF) / cantidad;
+    fleteUSD = pv(p.fleteFCL) / cantidad;
+    G = (pv(p.terminalPortuariaFCL) + pv(p.honorariosFCL) + pv(p.transporteNacFCL) +
+         pv(p.manejoDocFCL) + pv(p.thcFCL) + pv(p.tollFCL) + pv(p.handlingFCL) + pv(p.docFeeFCL)) / cantidad;
+  } else {
+    const cbm = pv(cbmVal);
+    const pesoCargaTotal = pv(pesoCargaTotalVal);
+    fleteUSD = pv(p.costoCBM) * cbm / cantidad;
+    G = (pv(p.manejoDocLCL) + pv(p.agpLCL) * (pesoCargaTotal / 1000) +
+         pv(p.desconsolidacionLCL) + pv(p.simLCL) + pv(p.logFeeLCL) +
+         (pv(p.depositoFiscalLCL) + (!p.verificacionIncluidaLCL ? pv(p.costoVerificacionLCL) : 0)) +
+         pv(p.honorariosLCL) + pv(p.transporteNacLCL)) / cantidad;
+  }
+
+  // costoSinFisc (ARS/unit) = FOB * A + B  →  linear in FOB
+  const F = fleteUSD + seguro + bunkerPorUnidad;
+  const A = tc * (1 + subfFactor * arancel);
+  const B = tc * (F * (1 + arancel) + G);
+
+  const pvpSIVA = pvpCIVA / 1.21;
+  const { j, k } = calcEnvioML(pvpCIVA, pesoRealKg, pesoVolKg);
+  const envioChico = pvpCIVA < 33000;
+  const cf = pvpSIVA * (mlCFpct / 100);
+  const cuotaCost = pvpCIVA * cuotaRealPct / 100;
+  const impDC = pvpCIVA * 0.012;
+  const envio = envioChico ? j : k;
+  const ingreso_neto = pvpSIVA - cf - envio - cuotaCost - impDC;
+
+  const costoTarget  = ingreso_neto * (1 - targetMarginPct / 100);
+  const fob_objetivo  = A > 0 ? (costoTarget  - B) / A : null;
+  const fob_breakeven = A > 0 ? (ingreso_neto - B) / A : null;
+
+  return { pvpCIVA, pvpSIVA, cf, envio, envioChico, cuotaCost, impDC, ingreso_neto, A, B,
+           fob_objetivo, fob_breakeven, targetMarginPct,
+           ganancia_objetivo: ingreso_neto * targetMarginPct / 100 };
+}
+
+/* ── HELPERS ───────────────────────────────────────────── */
+const pv = (x, def=0) => { const n=parseFloat(x); return isNaN(n)?def:n; };
+const ars = n => '$ ' + Math.round(n||0).toLocaleString('es-AR');
+const usd = n => 'USD ' + (n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt2 = n => (n||0).toLocaleString('es-AR',{minimumFractionDigits:1,maximumFractionDigits:2});
+const pct  = n => n == null ? '—' : ((n||0)*100).toLocaleString('es-AR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+const kg   = n => n == null ? '—' : (n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:3})+' kg';
+
+/* ── CALCULATE ─────────────────────────────────────────── */
+function calculate(p, d) {
+  const tc       = pv(p.tipoCambio, 1190);
+  const cantidad = pv(d.cantidad) || 1;
+
+  const precioUnitFOBReal = d.tipoPrecio === 'EXW'
+    ? pv(d.precioUnit) + pv(p.gastosEXW)/cantidad
+    : pv(d.precioUnit);
+  const subfPct           = pv(p.subfacturarPct, 0);
+  const precioUnitFOBDecl = precioUnitFOBReal * (1 - subfPct/100);
+  const subfacturadoUnit  = precioUnitFOBReal - precioUnitFOBDecl;
+
+  const seguro = pv(p.seguroFlat) / cantidad;
+  let fleteUSD = 0;
+  let gastosAdicionalesUSD = 0;
+  let detalleGastos = {};
+  let bunkerPorUnidad = 0;
+
+  if (d.tipoEmbarque === 'FCL') {
+    const term     = pv(p.terminalPortuariaFCL) / cantidad;
+    const hon      = pv(p.honorariosFCL) / cantidad;
+    const tran     = pv(p.transporteNacFCL) / cantidad;
+    bunkerPorUnidad      = pv(p.bunkerFAFBAF) / cantidad;
+    const manejoFCL   = pv(p.manejoDocFCL) / cantidad;
+    const thc      = pv(p.thcFCL) / cantidad;
+    const toll     = pv(p.tollFCL) / cantidad;
+    const handling = pv(p.handlingFCL) / cantidad;
+    const docFee   = pv(p.docFeeFCL) / cantidad;
+    fleteUSD = pv(p.fleteFCL) / cantidad;
+    detalleGastos = {
+      'Terminal Portuaria': term,
+      'Manejo de Documentación': manejoFCL,
+      'THC': thc,
+      'TOLL': toll,
+      'HANDLING': handling,
+      'DOC FEE': docFee,
+      'Honorarios despachante': hon,
+      'Transporte nacional': tran,
+    };
+    gastosAdicionalesUSD = term + manejoFCL + thc + toll + handling + docFee + hon + tran;
+  } else {
+    const cbm            = pv(d.cbm);
+    const pesoCargaTotal = pv(d.pesoCargaTotal);
+    const manejo   = pv(p.manejoDocLCL) / cantidad;
+    const agp      = pv(p.agpLCL) * (pesoCargaTotal/1000) / cantidad;
+    const descon   = pv(p.desconsolidacionLCL) / cantidad;
+    const sim      = pv(p.simLCL) / cantidad;
+    const log      = pv(p.logFeeLCL) / cantidad;
+    const depoBase = pv(p.depositoFiscalLCL) + (!p.verificacionIncluidaLCL ? pv(p.costoVerificacionLCL) : 0);
+    const depo     = depoBase / cantidad;
+    const hon      = pv(p.honorariosLCL) / cantidad;
+    const tran     = pv(p.transporteNacLCL) / cantidad;
+    fleteUSD = pv(p.costoCBM) * cbm / cantidad;
+    detalleGastos = {
+      'Manejo de doc.': manejo,
+      'AGP': agp,
+      'Desconsolidación': descon,
+      'SIM': sim,
+      'Log fee': log,
+      'Depósito fiscal': depo,
+      'Honorarios despachante': hon,
+      'Transporte nacional': tran,
+    };
+    gastosAdicionalesUSD = manejo + agp + descon + sim + log + depo + hon + tran;
+  }
+  const ivaGastos = gastosAdicionalesUSD * 0.21;
+
+  const costoEXWunit    = precioUnitFOBReal + bunkerPorUnidad;
+  const cifUSD          = costoEXWunit + fleteUSD + seguro;
+  const costoEXWDecl    = precioUnitFOBDecl + bunkerPorUnidad;
+  const cifDeclaradoUSD = costoEXWDecl + fleteUSD + seguro;
+  const baseArancel     = cifDeclaradoUSD * tc;
+  const die             = baseArancel * pv(p.diePct) / 100;
+  const te              = baseArancel * pv(p.tePct) / 100;
+  const baseIVA         = cifDeclaradoUSD * tc + die + te;
+  const ivaImport       = baseIVA * pv(p.ivaImportPct) / 100;
+  const ivaAdicional    = baseIVA * pv(p.ivaAdicionalPct) / 100;
+  const percIIGG        = baseIVA * pv(p.percIIGGpct) / 100;
+  const percIIBB        = baseIVA * pv(p.percIIBBpct) / 100;
+  const totalAranceles  = die + te;
+  const totalCredFisc   = ivaImport + ivaAdicional + percIIGG + percIIBB + ivaGastos * tc;
+  const costoSinFisc    = (cifUSD + gastosAdicionalesUSD) * tc + totalAranceles;
+  const costoTotalARS   = costoSinFisc + totalCredFisc;
+  const costoSinFiscUSD = costoSinFisc / tc;
+  const costoUnitUSD    = costoTotalARS / tc;
+
+  return {
+    precioUnitFOBReal, precioUnitFOBDecl, subfacturadoUnit, subfPct,
+    bunkerPorUnidad, costoEXWunit,
+    fleteUSD, seguro, cifUSD, cifDeclaradoUSD,
+    gastosAdicionalesUSD, ivaGastos, detalleGastos,
+    die, te, totalAranceles, baseIVA,
+    ivaImport, ivaAdicional, percIIGG, percIIBB, totalCredFisc,
+    costoTotalARS, costoSinFisc, costoUnitUSD, costoSinFiscUSD,
+  };
+}
+
+/* ── UI ATOMS ──────────────────────────────────────────── */
+const Field = ({ label, value, onChange, pre, suf, hint, small }) => (
+  <div className={small ? 'mb-2' : 'mb-3'}>
+    {label && <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>}
+    <div className="flex rounded-lg overflow-hidden border border-slate-200 bg-white focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-300 transition-all">
+      {pre && <span className="px-2.5 py-2 bg-slate-50 text-slate-400 text-xs border-r border-slate-200 whitespace-nowrap">{pre}</span>}
+      <input
+        type="number" step="any"
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+        className={`flex-1 px-3 bg-white outline-none text-slate-800 ${small ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
+      />
+      {suf && <span className="px-2.5 py-2 bg-slate-50 text-slate-400 text-xs border-l border-slate-200 whitespace-nowrap">{suf}</span>}
+    </div>
+    {hint && <p className="text-xs text-slate-400 mt-0.5">{hint}</p>}
+  </div>
+);
+
+const Toggle = ({ label, value, onChange, opts }) => (
+  <div className="mb-3">
+    {label && <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>}
+    <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
+      {opts.map(o => (
+        <button key={o.v} onClick={() => onChange(o.v)}
+          className={`flex-1 py-1.5 px-2 text-sm font-medium rounded-md transition-all ${
+            value === o.v ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
+const Row = ({ label, value, sub, bold, indent, green, red, gray, separator }) => (
+  <>
+    {separator && <div className="border-t border-slate-100 my-1"/>}
+    <div className={`flex justify-between items-center py-1.5 ${indent ? 'pl-3' : ''}`}>
+      <span className={`text-sm ${bold ? 'font-semibold text-slate-800' : gray ? 'text-slate-400 italic' : 'text-slate-500'}`}>{label}</span>
+      <div className="text-right">
+        <span className={`text-sm font-medium ${bold ? 'text-slate-800' : gray ? 'text-slate-400' : 'text-slate-700'} ${green ? 'text-green-600' : ''} ${red ? 'text-red-500' : ''}`}>
+          {value}
+        </span>
+        {sub && <div className="text-xs text-slate-400">{sub}</div>}
+      </div>
+    </div>
+  </>
+);
+
+const SectionLabel = ({ children }) => (
+  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-4 mb-2">{children}</div>
+);
+
+const Collapsible = ({ title, children, defaultOpen=false, badge }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="flex justify-between items-center w-full px-4 py-3 text-left">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-slate-700 text-sm">{title}</h3>
+          {badge && <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{badge}</span>}
+        </div>
+        <span className="text-slate-400 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div className="px-4 pb-4 fade-in">{children}</div>}
+    </div>
+  );
+};
+
+const CostoFinalRow = ({ labelUSD, labelARS, valUSD, valARS }) => (
+  <div className="mt-3 pt-3 border-t-2 border-indigo-200 space-y-1">
+    <div className="flex justify-between items-center">
+      <span className="text-sm font-bold text-slate-800">{labelUSD}</span>
+      <span className="text-sm font-bold text-indigo-700">{usd(valUSD)}</span>
+    </div>
+    <div className="flex justify-between items-center">
+      <span className="text-sm font-bold text-slate-800">{labelARS}</span>
+      <span className="text-sm font-bold text-indigo-700">{ars(valARS)}</span>
+    </div>
+  </div>
+);
+
+/* ── SAVE MODAL ────────────────────────────────────────── */
+const SaveModal = ({ onSave, onClose }) => {
+  const [nombre, setNombre] = useState('');
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm fade-in" onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-slate-800 text-lg mb-1">💾 Guardar cotización</h3>
+        <p className="text-slate-400 text-xs mb-4">Dale un nombre para identificarla más tarde.</p>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Ej: Auriculares BT China — Mayo 2026"
+          value={nombre}
+          onChange={e => setNombre(e.target.value)}
+          onKeyDown={e => { if (e.key==='Enter' && nombre.trim()) onSave(nombre.trim()); if (e.key==='Escape') onClose(); }}
+          className="w-full px-3 py-2.5 rounded-lg border border-slate-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300 outline-none text-slate-800 text-sm mb-4"
+        />
+        <div className="flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+            Cancelar
+          </button>
+          <button onClick={() => nombre.trim() && onSave(nombre.trim())} disabled={!nombre.trim()}
+            className="flex-1 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════
+   APP
+══════════════════════════════════════════════════════════ */
+const App = () => {
+  /* params */
+  const [p, setP] = useState(() => {
+    try { const s=localStorage.getItem(PARAMS_KEY); return s?{...DEFAULT_PARAMS,...JSON.parse(s)}:DEFAULT_PARAMS; }
+    catch { return DEFAULT_PARAMS; }
+  });
+  const upP = (k,v) => setP(prev => ({...prev,[k]: v===''?'':(isNaN(parseFloat(v))?prev[k]:parseFloat(v))}));
+  const upPBool = (k,v) => setP(prev => ({...prev,[k]:!!v}));
+  useEffect(() => { try{localStorage.setItem(PARAMS_KEY,JSON.stringify(p));}catch{} },[p]);
+
+  /* cotizaciones */
+  const [cotizaciones, setCotizaciones] = useState(() => {
+    try{const s=localStorage.getItem(COTIZ_KEY);return s?JSON.parse(s):[];}catch{return [];}
+  });
+  const saveCotiz = useCallback((nombre, data) => {
+    const arr=[{id:Date.now(),nombre,fecha:new Date().toLocaleDateString('es-AR'),...data},...cotizaciones];
+    setCotizaciones(arr);
+    try{localStorage.setItem(COTIZ_KEY,JSON.stringify(arr));}catch{}
+  },[cotizaciones]);
+  const deleteCotiz = useCallback(id => {
+    const arr=cotizaciones.filter(c=>c.id!==id);
+    setCotizaciones(arr);
+    try{localStorage.setItem(COTIZ_KEY,JSON.stringify(arr));}catch{}
+  },[cotizaciones]);
+
+  /* tabs */
+  const [tab, setTab] = useState('importacion');
+
+  /* producto inputs */
+  const [precioUnit,     setPrecioUnit]     = useState('');
+  const [cantidad,       setCantidad]       = useState('');
+  const [tipoPrecio,     setTipoPrecio]     = useState('FOB');
+  const [tipoEmbarque,   setTipoEmbarque]   = useState('FCL');
+  const [cbm,            setCbm]            = useState('');
+  const [pesoCargaTotal, setPesoCargaTotal] = useState('');
+  const [precioVenta,    setPrecioVenta]    = useState('');
+  const [largo,          setLargo]          = useState('');
+  const [ancho,          setAncho]          = useState('');
+  const [alto,           setAlto]           = useState('');
+  const [pesoReal,       setPesoReal]       = useState('');
+
+  /* Producto cuotas */
+  const [prodCuotas, setProdCuotas] = useState(0);
+
+  /* ML cuotas */
+  const [meliCuotas, setMeliCuotas] = useState(0);
+
+  /* ML independiente */
+  const [meliCosto,       setMeliCosto]       = useState('');
+  const [meliPrecioVenta, setMeliPrecioVenta] = useState('');
+  const [meliPesoReal,    setMeliPesoReal]    = useState('');
+  const [meliLargo,       setMeliLargo]       = useState('');
+  const [meliAncho,       setMeliAncho]       = useState('');
+  const [meliAlto,        setMeliAlto]        = useState('');
+
+  /* ME1 — Envío especial fuera de cálculo ML */
+  const [prodME1,       setProdME1]       = useState(false);
+  const [prodPrecioME1, setProdPrecioME1] = useState('');
+  const [prodEnvioGratis, setProdEnvioGratis] = useState(false);
+  const [meliME1,       setMeliME1]       = useState(false);
+  const [meliPrecioME1, setMeliPrecioME1] = useState('');
+  const [meliEnvioGratis, setMeliEnvioGratis] = useState(false);
+
+  /* MeLi Inverso */
+  const [invPVP,       setInvPVP]       = useState('');
+  const [invMargen,    setInvMargen]     = useState('');
+  const [invCantidad,  setInvCantidad]   = useState('');
+  const [invCuotas,    setInvCuotas]     = useState(0);
+  const [invLargo,     setInvLargo]      = useState('');
+  const [invAncho,     setInvAncho]      = useState('');
+  const [invAlto,      setInvAlto]       = useState('');
+  const [invPesoReal,  setInvPesoReal]   = useState('');
+
+  /* misc */
+  const [showSave,    setShowSave]    = useState(false);
+  const [searchQ,     setSearchQ]     = useState('');
+  const [expandCotiz, setExpandCotiz] = useState(null);
+
+  const reset = () => {
+    setPrecioUnit(''); setCantidad(''); setCbm(''); setPesoCargaTotal('');
+    setPrecioVenta(''); setLargo(''); setAncho(''); setAlto(''); setPesoReal('');
+  };
+
+  /* computed */
+  const mlCFpct = useMemo(() =>
+    pv(p.mlComisionPct,14.5)+pv(p.mlPublicidadPct,3)+pv(p.mlIIBBpct,5)+pv(p.mlVariosPct,2),
+    [p.mlComisionPct,p.mlPublicidadPct,p.mlIIBBpct,p.mlVariosPct]);
+
+  const cuotaRealPct   = meliCuotas>0 ? pv(p[`cuotas${meliCuotas}CostoReal`]) : 0;
+  const cuotaMarkupPct = pv(p.cuotasTrasladoAdicional);
+
+  const prodCuotaRealPct = prodCuotas>0 ? pv(p[`cuotas${prodCuotas}CostoReal`]) : 0;
+
+  const pesoVolCalc = useMemo(() => {
+    const l=pv(largo),a=pv(ancho),al=pv(alto);
+    return (l&&a&&al) ? l*a*al/4000 : 0;
+  },[largo,ancho,alto]);
+
+  const r = useMemo(() => {
+    if (!precioUnit||!cantidad) return null;
+    return calculate(p,{precioUnit,cantidad,tipoPrecio,tipoEmbarque,cbm,pesoCargaTotal,precioVenta,largo,ancho,alto,pesoReal});
+  },[p,precioUnit,cantidad,tipoPrecio,tipoEmbarque,cbm,pesoCargaTotal,precioVenta,largo,ancho,alto,pesoReal]);
+
+  const meliPesoVol = useMemo(() => {
+    const l=pv(meliLargo), a=pv(meliAncho), h=pv(meliAlto);
+    return (l&&a&&h) ? l*a*h/4000 : 0;
+  }, [meliLargo, meliAncho, meliAlto]);
+
+  const meliOptRec = useMemo(() => {
+    const c = pv(meliCosto);
+    const dcRate = pv(p.mlImpDebCredPct) / 100;
+    if (!c) return null;
+    if (meliME1 && pv(meliPrecioME1) > 0) {
+      const cfRate = mlCFpct / 100;
+      const cuotaRate = cuotaRealPct / 100;
+      const denom = (1 - cfRate) / 1.21 - cuotaRate - dcRate;
+      const be = denom > 0 ? (pv(meliPrecioME1) + c) / denom : Infinity;
+      return { be_bajo33: null, be_sobre33: be, isME1: true };
+    }
+    return calcBreakevens(c, pv(meliPesoReal), meliPesoVol, mlCFpct, cuotaRealPct, pv(p.mlImpDebCredPct));
+  }, [meliCosto, meliPesoReal, meliPesoVol, mlCFpct, meliME1, meliPrecioME1, cuotaRealPct, p.mlImpDebCredPct]);
+
+  const meliResultadoPrecio = useMemo(() => {
+    const costo   = pv(meliCosto);
+    const pvpCIVA = pv(meliPrecioVenta);
+    if (!costo || !pvpCIVA) return null;
+    const pvpSIVA = pvpCIVA / 1.21;
+    const envRes = (meliME1 && pv(meliPrecioME1) > 0)
+      ? { j: 0, k: pv(meliPrecioME1), envioGratisActivo: false }
+      : calcEnvioML(pvpCIVA, pv(meliPesoReal), meliPesoVol, meliEnvioGratis);
+    const { j, k, envioGratisActivo } = envRes;
+    const cfRate  = mlCFpct / 100;
+    const cf      = pvpSIVA * cfRate;
+    const cuotaCost = pvpCIVA * cuotaRealPct / 100;
+    const impDC = pvpCIVA * pv(p.mlImpDebCredPct) / 100;
+    const ganancia = pvpSIVA - k - cf - j - cuotaCost - impDC - costo;
+    const margen   = pvpSIVA > 0 ? ganancia / pvpSIVA : 0;
+    const buyerShipping = meliME1 ? false : (envioGratisActivo ? false : pvpCIVA < 33000);
+    return { pvpCIVA, pvpSIVA, j, k, cf, ganancia, margen, buyerShipping, envioGratisActivo, impDC };
+  }, [meliCosto, meliPrecioVenta, meliPesoReal, meliPesoVol, mlCFpct, cuotaRealPct, meliME1, meliPrecioME1, meliEnvioGratis, p.mlImpDebCredPct]);
+
+  const meliBrackets = useMemo(() => {
+    const c = pv(meliCosto);
+    if (!c) return [];
+    const me1p = meliME1 ? pv(meliPrecioME1) : 0;
+    return calcMLAllBrackets(c, pv(meliPesoReal), meliPesoVol, mlCFpct, cuotaRealPct, me1p, meliEnvioGratis, pv(p.mlImpDebCredPct));
+  }, [meliCosto, meliPesoReal, meliPesoVol, mlCFpct, cuotaRealPct, meliME1, meliPrecioME1, meliEnvioGratis, p.mlImpDebCredPct]);
+
+  const invPesoVol = useMemo(() => {
+    const l=pv(invLargo), a=pv(invAncho), h=pv(invAlto);
+    return (l&&a&&h) ? l*a*h/4000 : 0;
+  }, [invLargo, invAncho, invAlto]);
+
+  const invCuotaRealPct = invCuotas > 0 ? pv(p[`cuotas${invCuotas}CostoReal`]) : 0;
+
+  // invCantidad tiene prioridad; si está vacío usa la cantidad del tab Producto
+  const invCantidadEfectiva = pv(invCantidad) || pv(cantidad) || 0;
+
+  const invResult = useMemo(() => {
+    const pvpCIVA = pv(invPVP);
+    if (!pvpCIVA || invCantidadEfectiva <= 0) return null;
+    return calcFOBInverso(p, invCantidadEfectiva, tipoEmbarque, cbm, pesoCargaTotal,
+      pvpCIVA, pv(invMargen, 0), pv(invPesoReal), invPesoVol, invCuotaRealPct, mlCFpct);
+  }, [p, invCantidadEfectiva, tipoEmbarque, cbm, pesoCargaTotal,
+      invPVP, invMargen, invPesoReal, invPesoVol, invCuotaRealPct, mlCFpct]);
+
+  const bracketColor = m =>
+    m > 0.25  ? 'bg-green-50 text-green-700 font-bold' :
+    m > 0.12  ? 'bg-amber-50 text-amber-700 font-semibold' :
+    m > 0     ? 'bg-slate-50 text-slate-600' :
+                'bg-red-50 text-red-500';
+
+  /* ────────────────────────────────────────────────────── */
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col">
+
+      {/* HEADER */}
+      <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 text-white px-4 py-4 shadow-lg">
+        <div className="max-w-5xl mx-auto flex justify-between items-center gap-3">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">🧮 Calculadora de Importación</h1>
+            <p className="text-indigo-200 text-xs mt-0.5">Canton Fair · Argentina · v14</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {r && (
+              <button onClick={() => setShowSave(true)}
+                className="bg-white/15 hover:bg-white/25 text-white text-xs font-medium px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 border border-white/20">
+                💾 Guardar
+              </button>
+            )}
+            <button onClick={() => { reset(); setTab('importacion'); }}
+              className="bg-white text-indigo-700 text-xs font-semibold px-3 py-2 rounded-lg transition-all hover:bg-indigo-50 flex items-center gap-1.5 shadow-sm">
+              ✨ Nueva
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* TABS */}
+      <div className="bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-5xl mx-auto px-4 flex overflow-x-auto">
+          {[
+            ['importacion', '📋 Importación'],
+            ['producto',     '📦 Producto'],
+            ['ml',           '🛒 Cotizador ML'],
+            ['cotizaciones', '📚 Cotizaciones'],
+            ['params',       '⚙️ Parámetros'],
+          ].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+                tab===id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}>
+              {label}
+              {id==='cotizaciones' && cotizaciones.length>0 && (
+                <span className="ml-1.5 bg-indigo-100 text-indigo-600 text-xs px-1.5 py-0.5 rounded-full font-semibold">
+                  {cotizaciones.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ══ IMPORTACIÓN TAB ══ */}
+      {tab==='importacion' && (
+        <div className="max-w-5xl mx-auto w-full p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Inputs izquierda */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-semibold text-slate-800">Datos del producto</h2>
+                  <button onClick={reset} className="text-xs text-slate-400 hover:text-red-400 transition-colors">✕ Limpiar</button>
+                </div>
+
+                <Field label="Precio por unidad" value={precioUnit} onChange={setPrecioUnit} pre="USD"/>
+                <Field label="Cantidad de unidades" value={cantidad} onChange={setCantidad} suf="uds"/>
+
+                <Toggle label="Tipo de cotización" value={tipoPrecio} onChange={setTipoPrecio}
+                  opts={[{v:'FOB',l:'FOB'},{v:'EXW',l:'EXW'}]}/>
+
+                {tipoPrecio==='EXW' && (
+                  <div className="fade-in bg-indigo-50 rounded-lg px-3 py-2 mb-3">
+                    <p className="text-xs text-indigo-600">
+                      💡 Gastos hasta FOB: <strong>USD {pv(p.gastosEXW)}</strong>
+                      <span className="text-indigo-400 ml-1">— configurable en ⚙️</span>
+                    </p>
+                  </div>
+                )}
+
+                <Toggle label="Tipo de embarque" value={tipoEmbarque} onChange={setTipoEmbarque}
+                  opts={[{v:'FCL',l:'🚢 Container (FCL)'},{v:'LCL',l:'📦 Carga suelta (LCL)'}]}/>
+
+                <Field label="Subfacturación" value={p.subfacturarPct} onChange={v=>upP('subfacturarPct',v)} suf="%"/>
+
+                {tipoEmbarque==='LCL' && (
+                  <div className="fade-in">
+                    <Field label="Volumen del embarque" value={cbm} onChange={setCbm} suf="CBM"/>
+                    <Field label="Peso total del embarque" value={pesoCargaTotal} onChange={setPesoCargaTotal} suf="kg"
+                      hint="Necesario para calcular AGP por tonelada"/>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-50 rounded-lg px-3 py-2.5 space-y-1">
+                <div className="text-xs font-medium text-slate-400 uppercase mb-1">Parámetros activos</div>
+                <div className="flex justify-between text-xs"><span className="text-slate-400">Tipo de cambio</span><span className="text-slate-600 font-medium">$ {(pv(p.tipoCambio)||0).toLocaleString('es-AR')}</span></div>
+                {tipoEmbarque === 'FCL' ? (
+                  <>
+                    <div className="flex justify-between text-xs"><span className="text-slate-400">Flete container (CIF)</span><span className="text-slate-600 font-medium">{usd(pv(p.fleteFCL))}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-slate-400">Terminal + desp. + transp.</span><span className="text-slate-600 font-medium">{usd(pv(p.terminalPortuariaFCL)+pv(p.honorariosFCL)+pv(p.transporteNacFCL))}</span></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-xs"><span className="text-slate-400">Costo por CBM (CIF)</span><span className="text-slate-600 font-medium">{usd(pv(p.costoCBM))}/CBM</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-slate-400">Gastos Arg. (neto s/IVA)</span><span className="text-slate-600 font-medium">{r ? usd(r.gastosAdicionalesUSD * (pv(cantidad)||1)) : '—'}</span></div>
+                  </>
+                )}
+                {tipoPrecio === 'EXW' && <div className="flex justify-between text-xs"><span className="text-slate-400">Gastos hasta FOB (EXW)</span><span className="text-slate-600 font-medium">{usd(pv(p.gastosEXW))}</span></div>}
+                <div className="flex justify-between text-xs"><span className="text-slate-400">Subfacturación</span><span className="text-slate-600 font-medium">{pv(p.subfacturarPct)}%</span></div>
+              </div>
+            </div>
+
+            {/* Resultado derecha */}
+            <div className="space-y-4">
+              {!r ? (
+                <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-8 text-center text-slate-400 text-sm">
+                  Ingresá precio unitario y cantidad para ver el cálculo
+                </div>
+              ) : (<>
+                {/* Resultado principal */}
+                <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-xl p-5 shadow-lg">
+                  <p className="text-indigo-200 text-xs font-medium mb-1">Costo por unidad (sin créditos fiscales)</p>
+                  <p className="text-3xl font-bold">{ars(r.costoSinFisc)}</p>
+                  <p className="text-indigo-200 text-sm mt-1">{usd(r.costoSinFiscUSD)}</p>
+                </div>
+
+                {/* Desglose de importación */}
+                {(() => {
+                  const q  = pv(cantidad) || 1;
+                  const tc = pv(p.tipoCambio, 1190);
+                  return (
+                    <Collapsible title="📋 Desglose de importación" defaultOpen={true}>
+                      <SectionLabel>Compra en origen — {q} unidades</SectionLabel>
+                      <Row label={`FOB real${r.bunkerPorUnidad>0?' + BUNKER':''} total`} value={usd(r.costoEXWunit * q)} sub={`${q} uds × ${usd(r.costoEXWunit)}`}/>
+                      {tipoPrecio==='EXW' && <Row indent label="↳ Precio EXW total" value={usd(pv(precioUnit) * q)}/>}
+                      {tipoPrecio==='EXW' && pv(p.gastosEXW) > 0 && <Row indent label="↳ Gastos hasta FOB (EXW)" value={usd(pv(p.gastosEXW))} sub={`fijo por lote ÷ ${q} uds`}/>}
+                      {r.subfPct > 0 && <Row indent red label={`↳ FOB declarado a aduana (−${r.subfPct}% subfacturación)`} value={usd(r.precioUnitFOBDecl * q)} sub="Base reducida para impuestos"/>}
+                      {r.bunkerPorUnidad > 0 && <Row indent label="↳ BUNKER/FAF/BAF total" value={usd(r.bunkerPorUnidad * q)}/>}
+                      <Row indent label="Seguro total" value={usd(r.seguro * q)}/>
+                      <Row indent label={tipoEmbarque==='FCL' ? 'Flete container (FCL)' : 'Flete LCL'} value={usd(r.fleteUSD * q)}/>
+                      <Row bold label={r.subfPct>0 ? 'CIF declarado (base imponible)' : 'CIF total'} value={usd((r.subfPct>0 ? r.cifDeclaradoUSD : r.cifUSD) * q)} separator/>
+
+                      <SectionLabel>Aranceles (sobre CIF{r.subfPct>0?' declarado':''})</SectionLabel>
+                      <Row indent label={`↳ DIE — arancel (${pv(p.diePct)}%)`} value={usd(r.die / tc * q)}/>
+                      <Row indent label={`↳ TE — tasa estadística (${pv(p.tePct)}%)`} value={usd(r.te / tc * q)}/>
+                      <Row bold label="Total aranceles" value={usd(r.totalAranceles / tc * q)} separator/>
+
+                      <SectionLabel>Gastos en Argentina ({tipoEmbarque==='FCL'?'FCL':'LCL'})</SectionLabel>
+                      {Object.entries(r.detalleGastos).map(([k,v]) =>
+                        v > 0 ? <Row key={k} indent label={`↳ ${k}`} value={usd(v * q)}/> : null
+                      )}
+                      <Row bold label="Total gastos Argentina" value={usd(r.gastosAdicionalesUSD * q)} separator/>
+
+                      <SectionLabel>Créditos fiscales (recuperables)</SectionLabel>
+                      <Row gray indent label={`↳ IVA importación (${pv(p.ivaImportPct)}%)`} value={usd(r.ivaImport / tc * q)}/>
+                      <Row gray indent label={`↳ IVA adicional (${pv(p.ivaAdicionalPct)}%)`} value={usd(r.ivaAdicional / tc * q)}/>
+                      <Row gray indent label={`↳ Percep. a cta. IIGG (${pv(p.percIIGGpct)}%)`} value={usd(r.percIIGG / tc * q)}/>
+                      <Row gray indent label={`↳ Percep. a cta. IIBB (${pv(p.percIIBBpct)}%)`} value={usd(r.percIIBB / tc * q)}/>
+                      {r.ivaGastos > 0 && <Row gray indent label="↳ IVA gastos Argentina (21%)" value={usd(r.ivaGastos * q)}/>}
+                      <Row bold label="Total créditos fiscales" value={usd(r.totalCredFisc / tc * q)} separator/>
+                      <p className="text-xs text-slate-400 mt-1 mb-2">* Se recuperan vía compensación fiscal — no son costo real.</p>
+
+                      <CostoFinalRow
+                        labelUSD="💵 Costo final x unidad (USD, sin créd. fisc.)"
+                        labelARS="💵 Costo final x unidad (ARS, sin créd. fisc.)"
+                        valUSD={r.costoSinFiscUSD}
+                        valARS={r.costoSinFisc}
+                      />
+                    </Collapsible>
+                  );
+                })()}
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ PRODUCTO TAB ══ */}
+      {tab==='producto' && (
+        <div className="max-w-5xl mx-auto w-full p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Inputs izquierda */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-semibold text-slate-800">Datos del producto</h2>
+                  <button onClick={reset} className="text-xs text-slate-400 hover:text-red-400 transition-colors">✕ Limpiar</button>
+                </div>
+
+                <Field label="Precio por unidad" value={precioUnit} onChange={setPrecioUnit} pre="USD"/>
+                <Field label="Cantidad de unidades" value={cantidad} onChange={setCantidad} suf="uds"/>
+
+                <Toggle label="Tipo de cotización" value={tipoPrecio} onChange={setTipoPrecio}
+                  opts={[{v:'FOB',l:'FOB'},{v:'EXW',l:'EXW'}]}/>
+
+                {tipoPrecio==='EXW' && (
+                  <div className="fade-in bg-indigo-50 rounded-lg px-3 py-2 mb-3">
+                    <p className="text-xs text-indigo-600">
+                      💡 Gastos hasta FOB: <strong>USD {pv(p.gastosEXW)}</strong>
+                      <span className="text-indigo-400 ml-1">— configurable en ⚙️</span>
+                    </p>
+                  </div>
+                )}
+
+                <Toggle label="Tipo de embarque" value={tipoEmbarque} onChange={setTipoEmbarque}
+                  opts={[{v:'FCL',l:'🚢 Container (FCL)'},{v:'LCL',l:'📦 Carga suelta (LCL)'}]}/>
+
+                <Field label="Subfacturación" value={p.subfacturarPct} onChange={v=>upP('subfacturarPct',v)} suf="%"/>
+
+                {tipoEmbarque==='LCL' && (
+                  <div className="fade-in">
+                    <Field label="Volumen del embarque" value={cbm} onChange={setCbm} suf="CBM"/>
+                    <Field label="Peso total del embarque" value={pesoCargaTotal} onChange={setPesoCargaTotal} suf="kg"
+                      hint="Necesario para calcular AGP por tonelada"/>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-1">📐 Dimensiones y peso</h2>
+                <p className="text-xs text-slate-400 mb-3">Necesario para calcular envío en MercadoLibre.</p>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <Field small label="Largo" value={largo} onChange={setLargo} suf="cm"/>
+                  <Field small label="Ancho" value={ancho} onChange={setAncho} suf="cm"/>
+                  <Field small label="Alto"  value={alto}  onChange={setAlto}  suf="cm"/>
+                </div>
+                <Field label="Peso real del producto" value={pesoReal} onChange={setPesoReal} suf="kg"/>
+                {(pesoVolCalc>0 || pv(pesoReal)>0) && (
+                  <div className="bg-blue-50 rounded-lg px-3 py-2 mt-2 space-y-1">
+                    {pesoVolCalc>0 && <p className="text-xs text-blue-600">Peso vol.: <strong>{pesoVolCalc.toFixed(3)} kg</strong></p>}
+                    {pv(pesoReal)>0 && pesoVolCalc>0 && (
+                      <p className="text-xs text-blue-600">Peso cobrado ML: <strong>{Math.max(pv(pesoReal),pesoVolCalc).toFixed(3)} kg</strong></p>
+                    )}
+                  </div>
+                )}
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                    <input type="checkbox" checked={prodEnvioGratis} onChange={e=>{setProdEnvioGratis(e.target.checked); if(e.target.checked) setProdME1(false);}}
+                      className="w-4 h-4 rounded accent-green-500 cursor-pointer"/>
+                    <span className="text-sm font-medium text-slate-700">🚚 Ofrecer envío gratis (PVP &lt; $33.000)</span>
+                  </label>
+                  {prodEnvioGratis && (
+                    <div className="fade-in bg-green-50 rounded-lg px-3 py-2 mb-2">
+                      <p className="text-xs text-green-700">El vendedor absorbe el costo de envío aunque el PVP sea menor a $33.000. Se aplica la tarifa de envío gratis de ML.</p>
+                    </div>
+                  )}
+                  <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                    <input type="checkbox" checked={prodME1} onChange={e=>{setProdME1(e.target.checked); if(e.target.checked) setProdEnvioGratis(false);}}
+                      className="w-4 h-4 rounded accent-orange-500 cursor-pointer"/>
+                    <span className="text-sm font-medium text-slate-700">📦 Envío ME1 (fuera de cálculo ML)</span>
+                  </label>
+                  {prodME1 && (
+                    <div className="fade-in">
+                      <Field label="Precio de envío ME1 por unidad" value={prodPrecioME1}
+                        onChange={setProdPrecioME1} pre="ARS"
+                        hint="Envío pesado/grande fuera de ML"/>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">🛒 Precio de venta</h2>
+                <Field label="Precio de venta en MercadoLibre (con IVA)" value={precioVenta} onChange={setPrecioVenta} pre="ARS"/>
+
+                {/* Cuotas selector */}
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">💳 Modalidad de pago</label>
+                  <div className="flex bg-slate-100 rounded-lg p-1 gap-1 flex-wrap">
+                    {[0,3,6,9,12].map(c => (
+                      <button key={c} onClick={() => setProdCuotas(c)}
+                        className={`flex-1 py-1.5 px-2 text-sm font-medium rounded-md transition-all min-w-max ${
+                          prodCuotas===c ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        {c===0 ? 'Contado' : `${c} cuotas`}
+                      </button>
+                    ))}
+                  </div>
+                  {prodCuotas>0 && (
+                    <div className="mt-2 bg-indigo-50 rounded-lg px-3 py-2 text-xs text-indigo-700 fade-in">
+                      📊 Costo real cuotas: <strong>{fmt2(prodCuotaRealPct)}%</strong>
+                    </div>
+                  )}
+                </div>
+                <div className="bg-slate-50 rounded-lg px-3 py-2.5 space-y-1">
+                  <div className="text-xs font-medium text-slate-400 uppercase mb-1">Parámetros activos</div>
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Tipo de cambio</span><span className="text-slate-600 font-medium">$ {(pv(p.tipoCambio)||0).toLocaleString('es-AR')}</span></div>
+                  {tipoEmbarque === 'FCL' ? (
+                    <>
+                      <div className="flex justify-between text-xs"><span className="text-slate-400">Flete container (CIF)</span><span className="text-slate-600 font-medium">{usd(pv(p.fleteFCL))}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-slate-400">Terminal + desp. + transp.</span><span className="text-slate-600 font-medium">{usd(pv(p.terminalPortuariaFCL)+pv(p.honorariosFCL)+pv(p.transporteNacFCL))}</span></div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-xs"><span className="text-slate-400">Costo por CBM (CIF)</span><span className="text-slate-600 font-medium">{usd(pv(p.costoCBM))}/CBM</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-slate-400">Gastos Arg. (neto s/IVA)</span><span className="text-slate-600 font-medium">{r ? usd(r.gastosAdicionalesUSD * (pv(cantidad)||1)) : '—'}</span></div>
+                    </>
+                  )}
+                  {tipoPrecio === 'EXW' && <div className="flex justify-between text-xs"><span className="text-slate-400">Gastos hasta FOB (EXW)</span><span className="text-slate-600 font-medium">{usd(pv(p.gastosEXW))}</span></div>}
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Subfacturación</span><span className="text-slate-600 font-medium">{pv(p.subfacturarPct)}%</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Costos fijos ML</span><span className="text-slate-600 font-medium">{fmt2(mlCFpct)}% del PVP S/IVA</span></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Resultado derecha */}
+            <div className="space-y-4">
+              {!r ? (
+                <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-8 text-center text-slate-400 text-sm">
+                  Ingresá precio unitario y cantidad para ver el cálculo
+                </div>
+              ) : (<>
+                {/* Resultado principal */}
+                <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-xl p-5 shadow-lg">
+                  <p className="text-indigo-200 text-xs font-medium mb-1">Costo por unidad (sin créditos fiscales)</p>
+                  <p className="text-3xl font-bold">{ars(r.costoSinFisc)}</p>
+                  <p className="text-indigo-200 text-sm mt-1">{usd(r.costoSinFiscUSD)}</p>
+                </div>
+
+                {/* Margen ML */}
+                {precioVenta && (() => {
+                  const pvpCIVA = pv(precioVenta);
+                  const pvpSIVA = pvpCIVA / 1.21;
+                  const { j, k } = (prodME1 && pv(prodPrecioME1) > 0)
+                    ? { j: 0, k: pv(prodPrecioME1), envioGratisActivo: false }
+                    : calcEnvioML(pvpCIVA, pv(pesoReal), pesoVolCalc, prodEnvioGratis);
+                  const cf = pvpSIVA * (mlCFpct / 100);
+                  const cuotaCost = pvpCIVA * prodCuotaRealPct / 100;
+                  const impDC = pvpCIVA * pv(p.mlImpDebCredPct) / 100;
+                  const gananciaML = pvpSIVA - k - cf - j - cuotaCost - impDC - r.costoSinFisc;
+                  const margenSIVA = pvpSIVA > 0 ? gananciaML / pvpSIVA : 0;
+                  const margenCIVA = pvpCIVA > 0 ? gananciaML / pvpCIVA : 0;
+                  const margenCosto = r.costoSinFisc > 0 ? gananciaML / r.costoSinFisc : 0;
+                  const colorBg = margenSIVA > 0.25 ? 'from-green-500 to-green-600'
+                    : margenSIVA > 0.12 ? 'from-amber-500 to-amber-600'
+                    : margenSIVA > 0    ? 'from-slate-400 to-slate-500'
+                    : 'from-red-500 to-red-600';
+                  return (
+                    <div className={`bg-gradient-to-br ${colorBg} text-white rounded-xl p-4 shadow-md fade-in`}>
+                      <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-1">Rentabilidad s/ facturación S/IVA</div>
+                      <div className="text-4xl font-bold tracking-tight">{pct(margenSIVA)}</div>
+                      <div className="text-white/80 text-sm mt-1">Ganancia: {ars(gananciaML)}</div>
+                      <div className="mt-2 pt-2 border-t border-white/20 text-white/60 text-xs grid grid-cols-2 gap-1">
+                        <div>Sobre PVP C/IVA: {pct(margenCIVA)}</div>
+                        <div>Sobre costo: {pct(margenCosto)}</div>
+                        <div>PVP S/IVA: {ars(pvpSIVA)}</div>
+                        <div>CMV: {ars(r.costoSinFisc)}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Breakeven ML */}
+                {(() => {
+                  const optRec = calcBreakevens(r.costoSinFisc, pv(pesoReal), pesoVolCalc, mlCFpct, prodCuotaRealPct, pv(p.mlImpDebCredPct));
+                  return (
+                    <div className="bg-gradient-to-br from-violet-600 to-violet-700 text-white rounded-xl p-4 shadow-md fade-in">
+                      <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-3">⚖️ Punto de equilibrio para ML (margen = 0%)</div>
+                      <div className="space-y-2">
+                        <div className="bg-white/10 rounded-lg px-3 py-2.5">
+                          <div className="text-white/60 text-xs mb-1">PVP &lt; $33.000 · envío a cargo del cliente</div>
+                          {optRec.be_bajo33 != null
+                            ? <div className="text-2xl font-bold">{ars(optRec.be_bajo33)}</div>
+                            : <div className="text-sm font-semibold text-red-200">No alcanzable — el costo supera el límite del tramo</div>
+                          }
+                        </div>
+                        <div className="bg-white/10 rounded-lg px-3 py-2.5">
+                          <div className="text-white/60 text-xs mb-1">PVP ≥ $33.000 · envío a cargo del vendedor</div>
+                          <div className="text-2xl font-bold">{ars(optRec.be_sobre33)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Desglose de importación */}
+                {(() => {
+                  const q  = pv(cantidad) || 1;
+                  const tc = pv(p.tipoCambio, 1190);
+                  return (
+                    <Collapsible title="📋 Desglose de importación" defaultOpen={true}>
+                      <SectionLabel>Compra en origen — {q} unidades</SectionLabel>
+                      <Row label={`FOB real${r.bunkerPorUnidad>0?' + BUNKER':''} total`} value={usd(r.costoEXWunit * q)} sub={`${q} uds × ${usd(r.costoEXWunit)}`}/>
+                      {tipoPrecio==='EXW' && <Row indent label="↳ Precio EXW total" value={usd(pv(precioUnit) * q)}/>}
+                      {tipoPrecio==='EXW' && pv(p.gastosEXW) > 0 && <Row indent label="↳ Gastos hasta FOB (EXW)" value={usd(pv(p.gastosEXW))} sub={`fijo por lote ÷ ${q} uds`}/>}
+                      {r.subfPct > 0 && <Row indent red label={`↳ FOB declarado a aduana (−${r.subfPct}% subfacturación)`} value={usd(r.precioUnitFOBDecl * q)} sub="Base reducida para impuestos"/>}
+                      {r.bunkerPorUnidad > 0 && <Row indent label="↳ BUNKER/FAF/BAF total" value={usd(r.bunkerPorUnidad * q)}/>}
+                      <Row indent label="Seguro total" value={usd(r.seguro * q)}/>
+                      <Row indent label={tipoEmbarque==='FCL' ? 'Flete container (FCL)' : 'Flete LCL'} value={usd(r.fleteUSD * q)}/>
+                      <Row bold label={r.subfPct>0 ? 'CIF declarado (base imponible)' : 'CIF total'} value={usd((r.subfPct>0 ? r.cifDeclaradoUSD : r.cifUSD) * q)} separator/>
+
+                      <SectionLabel>Aranceles (sobre CIF{r.subfPct>0?' declarado':''})</SectionLabel>
+                      <Row indent label={`↳ DIE — arancel (${pv(p.diePct)}%)`} value={usd(r.die / tc * q)}/>
+                      <Row indent label={`↳ TE — tasa estadística (${pv(p.tePct)}%)`} value={usd(r.te / tc * q)}/>
+                      <Row bold label="Total aranceles" value={usd(r.totalAranceles / tc * q)} separator/>
+
+                      <SectionLabel>Gastos en Argentina ({tipoEmbarque==='FCL'?'FCL':'LCL'})</SectionLabel>
+                      {Object.entries(r.detalleGastos).map(([k,v]) =>
+                        v > 0 ? <Row key={k} indent label={`↳ ${k}`} value={usd(v * q)}/> : null
+                      )}
+                      <Row bold label="Total gastos Argentina" value={usd(r.gastosAdicionalesUSD * q)} separator/>
+
+                      <SectionLabel>Créditos fiscales (recuperables)</SectionLabel>
+                      <Row gray indent label={`↳ IVA importación (${pv(p.ivaImportPct)}%)`} value={usd(r.ivaImport / tc * q)}/>
+                      <Row gray indent label={`↳ IVA adicional (${pv(p.ivaAdicionalPct)}%)`} value={usd(r.ivaAdicional / tc * q)}/>
+                      <Row gray indent label={`↳ Percep. a cta. IIGG (${pv(p.percIIGGpct)}%)`} value={usd(r.percIIGG / tc * q)}/>
+                      <Row gray indent label={`↳ Percep. a cta. IIBB (${pv(p.percIIBBpct)}%)`} value={usd(r.percIIBB / tc * q)}/>
+                      {r.ivaGastos > 0 && <Row gray indent label="↳ IVA gastos Argentina (21%)" value={usd(r.ivaGastos * q)}/>}
+                      <Row bold label="Total créditos fiscales" value={usd(r.totalCredFisc / tc * q)} separator/>
+                      <p className="text-xs text-slate-400 mt-1 mb-2">* Se recuperan vía compensación fiscal — no son costo real.</p>
+
+                      <CostoFinalRow
+                        labelUSD="💵 Costo final x unidad (USD, sin créd. fisc.)"
+                        labelARS="💵 Costo final x unidad (ARS, sin créd. fisc.)"
+                        valUSD={r.costoSinFiscUSD}
+                        valARS={r.costoSinFisc}
+                      />
+                    </Collapsible>
+                  );
+                })()}
+
+                {/* Desglose MercadoLibre — siempre visible */}
+                {(() => {
+                  const pvpCIVA = pv(precioVenta) || 0;
+                  const pvpSIVA = pvpCIVA / 1.21;
+                  const tieneVenta = pvpCIVA > 0;
+                  const envRes = tieneVenta
+                    ? ((prodME1 && pv(prodPrecioME1) > 0)
+                      ? { j: 0, k: pv(prodPrecioME1), envioGratisActivo: false }
+                      : calcEnvioML(pvpCIVA, pv(pesoReal), pesoVolCalc, prodEnvioGratis))
+                    : { j: 0, k: 0, envioGratisActivo: false };
+                  const { j, k, envioGratisActivo } = envRes;
+                  const comision   = pvpSIVA * pv(p.mlComisionPct)  / 100;
+                  const publicidad = pvpSIVA * pv(p.mlPublicidadPct) / 100;
+                  const iibbML     = pvpSIVA * pv(p.mlIIBBpct)       / 100;
+                  const variosML   = pvpSIVA * pv(p.mlVariosPct)      / 100;
+                  const cf         = comision + publicidad + iibbML + variosML;
+                  const envioChico = (prodME1 && pv(prodPrecioME1) > 0) ? false : (envioGratisActivo ? false : pvpCIVA < 33000);
+                  const cuotaCost  = pvpCIVA * prodCuotaRealPct / 100;
+                  const impDC      = pvpCIVA * pv(p.mlImpDebCredPct) / 100;
+                  const gananciaML = tieneVenta ? pvpSIVA - (envioChico ? j : k) - cf - cuotaCost - impDC - r.costoSinFisc : null;
+                  const fmtVal = (pct, ars_val) => tieneVenta ? `− ${ars(ars_val)}` : `${fmt2(pct)}%`;
+                  return (
+                    <Collapsible title="🛒 Desglose MercadoLibre" defaultOpen={true}>
+                      {tieneVenta && (<>
+                        <SectionLabel>Precio de venta</SectionLabel>
+                        <Row bold label="PVP con IVA (precio publicado)" value={ars(pvpCIVA)}/>
+                        <Row indent label="↳ PVP sin IVA (21%)" value={ars(pvpSIVA)}/>
+                      </>)}
+                      <SectionLabel>Comisiones fijas ML ({fmt2(mlCFpct)}% del PVP S/IVA)</SectionLabel>
+                      <Row indent label={`↳ Comisión ML (${pv(p.mlComisionPct)}%)`}   value={fmtVal(pv(p.mlComisionPct),  comision)}/>
+                      <Row indent label={`↳ Publicidad (${pv(p.mlPublicidadPct)}%)`}  value={fmtVal(pv(p.mlPublicidadPct), publicidad)}/>
+                      <Row indent label={`↳ IIBB ML (${pv(p.mlIIBBpct)}%)`}           value={fmtVal(pv(p.mlIIBBpct),       iibbML)}/>
+                      <Row indent label={`↳ Varios (${pv(p.mlVariosPct)}%)`}           value={fmtVal(pv(p.mlVariosPct),     variosML)}/>
+                      <Row bold label="Total comisiones fijas" value={tieneVenta ? `− ${ars(cf)}` : `${fmt2(mlCFpct)}% del PVP S/IVA`} separator/>
+                      {tieneVenta && (<>
+                        {envioGratisActivo ? (<>
+                          <SectionLabel>🚚 Envío gratis ofrecido (PVP &lt; $33.000)</SectionLabel>
+                          <Row indent label="↳ Envío absorbido (gratis)" value={`− ${ars(k)}`}/>
+                        </>) : envioChico ? (<>
+                          <SectionLabel>Comisión variable ML (PVP &lt; $33.000)</SectionLabel>
+                          <Row indent label="↳ Comisión variable (cargo del vendedor)" value={`− ${ars(j)}`}/>
+                          <div className="text-xs text-slate-400 italic pl-3 mb-1">El envío lo paga el comprador — no impacta tu rentabilidad.</div>
+                        </>) : (<>
+                          <SectionLabel>{prodME1 ? 'Envío ME1 (precio manual)' : 'Envío absorbido por el vendedor (PVP ≥ $33.000)'}</SectionLabel>
+                          <Row indent label={prodME1 ? '↳ Envío ME1' : '↳ Envío absorbido'} value={`− ${ars(k)}`}/>
+                        </>)}
+                        {prodCuotas > 0 && (<>
+                          <SectionLabel>Costo cuotas ({prodCuotas}c)</SectionLabel>
+                          <Row indent label={`↳ Cuotas ${prodCuotas}c (${fmt2(prodCuotaRealPct)}% sobre PVP C/IVA)`} value={`− ${ars(cuotaCost)}`}/>
+                        </>)}
+                        <Row indent label={`↳ Imp. Déb y Créd (${fmt2(pv(p.mlImpDebCredPct))}% sobre PVP C/IVA)`} value={`− ${ars(impDC)}`}/>
+                        <SectionLabel>Costo de mercadería</SectionLabel>
+                        <Row indent label="↳ CMV (sin créditos fiscales)" value={`− ${ars(r.costoSinFisc)}`} separator/>
+                        <Row bold green label="Ganancia neta" value={ars(gananciaML)} separator/>
+                      </>)}
+                      {!tieneVenta && (
+                        <p className="text-xs text-slate-400 italic mt-1">Ingresá el precio de venta para ver montos y ganancia.</p>
+                      )}
+                    </Collapsible>
+                  );
+                })()}
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ COTIZADOR ML TAB ══ */}
+      {tab==='ml' && (
+        <div className="max-w-5xl mx-auto w-full p-4 fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Inputs */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-1">🛒 Cotizador MercadoLibre</h2>
+                <p className="text-xs text-slate-400 mb-4">Ingresá tu costo de compra S/IVA y calculamos el PVP óptimo y la rentabilidad por tramo.</p>
+
+                {/* Selector cuotas */}
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">💳 Modalidad de pago</label>
+                  <div className="flex bg-slate-100 rounded-lg p-1 gap-1 flex-wrap">
+                    {[0,3,6,9,12].map(c => (
+                      <button key={c} onClick={() => setMeliCuotas(c)}
+                        className={`flex-1 py-1.5 px-2 text-sm font-medium rounded-md transition-all min-w-max ${
+                          meliCuotas===c ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        {c===0 ? 'Contado' : `${c} cuotas`}
+                      </button>
+                    ))}
+                  </div>
+                  {meliCuotas>0 && (
+                    <div className="mt-2 bg-indigo-50 rounded-lg px-3 py-2 text-xs text-indigo-700 fade-in flex gap-4 flex-wrap">
+                      <span>📊 Costo real: <strong>{fmt2(cuotaRealPct)}%</strong></span>
+                      <span>➕ Traslado: <strong>{fmt2(cuotaMarkupPct)}%</strong></span>
+                    </div>
+                  )}
+                </div>
+
+                <Field label="Costo de compra S/IVA (ARS)" value={meliCosto} onChange={setMeliCosto} pre="ARS"/>
+                <Field label="Precio de venta C/IVA (ARS)" value={meliPrecioVenta} onChange={setMeliPrecioVenta} pre="ARS"/>
+
+                <div className="border-t border-slate-100 pt-3 mt-1">
+                  <p className="text-xs font-medium text-slate-500 mb-2">📐 Dimensiones y peso (para calcular envío ML)</p>
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <Field small label="Largo" value={meliLargo} onChange={setMeliLargo} suf="cm"/>
+                    <Field small label="Ancho" value={meliAncho} onChange={setMeliAncho} suf="cm"/>
+                    <Field small label="Alto"  value={meliAlto}  onChange={setMeliAlto}  suf="cm"/>
+                  </div>
+                  <Field label="Peso real" value={meliPesoReal} onChange={setMeliPesoReal} suf="kg"/>
+
+                  {(() => {
+                    const l=pv(meliLargo), a=pv(meliAncho), h=pv(meliAlto);
+                    const pr=pv(meliPesoReal);
+                    const pvol = meliPesoVol;
+                    const cobrado = pvol > 0 ? Math.max(pr, pvol) : (pr || null);
+                    if (!pvol && !pr) return null;
+                    return (
+                      <div className="bg-blue-50 rounded-lg px-3 py-2 mt-2 space-y-1">
+                        {pr > 0 && <div className="flex justify-between text-xs"><span className="text-slate-500">Peso real</span><span className="text-slate-700 font-medium">{kg(pr)}</span></div>}
+                        {pvol > 0 && <div className="flex justify-between text-xs"><span className="text-slate-500">Peso vol. ({l}×{a}×{h}/4000)</span><span className="text-slate-700 font-medium">{kg(pvol)}</span></div>}
+                        {cobrado !== null && <div className="flex justify-between text-xs border-t border-blue-100 pt-1 mt-1"><span className="text-blue-700 font-semibold">Peso cobrado ML</span><span className="text-blue-700 font-bold">{kg(cobrado)}</span></div>}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Envío gratis + ME1 */}
+                  <div className="mt-3 pt-2 border-t border-slate-100">
+                    <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                      <input type="checkbox" checked={meliEnvioGratis} onChange={e=>{setMeliEnvioGratis(e.target.checked); if(e.target.checked) setMeliME1(false);}}
+                        className="w-4 h-4 rounded accent-green-500 cursor-pointer"/>
+                      <span className="text-sm font-medium text-slate-700">🚚 Ofrecer envío gratis (PVP &lt; $33.000)</span>
+                    </label>
+                    {meliEnvioGratis && (
+                      <div className="fade-in bg-green-50 rounded-lg px-3 py-2 mb-2">
+                        <p className="text-xs text-green-700">El vendedor absorbe el costo de envío aunque el PVP sea menor a $33.000.</p>
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                      <input type="checkbox" checked={meliME1} onChange={e=>{setMeliME1(e.target.checked); if(e.target.checked) setMeliEnvioGratis(false);}}
+                        className="w-4 h-4 rounded accent-orange-500 cursor-pointer"/>
+                      <span className="text-sm font-medium text-slate-700">📦 Envío ME1 (precio manual)</span>
+                    </label>
+                    {meliME1 && (
+                      <div className="fade-in">
+                        <Field label="Precio de envío ME1 por unidad" value={meliPrecioME1}
+                          onChange={setMeliPrecioME1} pre="ARS"
+                          hint="Reemplaza el cálculo de tarifa ML para envíos pesados/especiales"/>
+                      </div>
+                    )}
+                    {!meliME1 && !meliEnvioGratis && (
+                      <p className="text-xs text-slate-400">Activar envío gratis o ME1 según corresponda</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-0 pt-0 border-t border-slate-100">
+                  <div className="flex justify-between text-xs text-slate-400 px-0 pt-3 pb-1">
+                    <span>Costos fijos ML</span>
+                    <span className="font-medium">{fmt2(mlCFpct)}% del PVP S/IVA</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">Cambiar en ⚙️ Parámetros → Venta ML</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Resultados */}
+            <div className="space-y-3">
+              {!pv(meliCosto) ? (
+                <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-10 text-center">
+                  <div className="text-5xl mb-3">🛒</div>
+                  <p className="text-slate-400 text-sm">Ingresá el costo de compra S/IVA<br/>para ver el análisis por tramos</p>
+                </div>
+              ) : (
+                <>
+                  {/* Resultado al precio ingresado */}
+                  {meliResultadoPrecio && (() => {
+                    const mr = meliResultadoPrecio;
+                    const colorBg = mr.margen > 0.25 ? 'from-green-500 to-green-600'
+                      : mr.margen > 0.12 ? 'from-amber-500 to-amber-600'
+                      : mr.margen > 0    ? 'from-slate-400 to-slate-500'
+                      : 'from-red-500 to-red-600';
+                    return (
+                      <div className={`bg-gradient-to-br ${colorBg} text-white rounded-xl p-4 shadow-md fade-in`}>
+                        <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">📈 Resultado a tu precio de venta</div>
+                        <div className="flex items-end gap-3 mb-3">
+                          <div>
+                            <div className="text-white/60 text-xs">PVP C/IVA ingresado</div>
+                            <div className="text-3xl font-bold tracking-tight">{ars(mr.pvpCIVA)}</div>
+                          </div>
+                          <div className="pb-0.5">
+                            <div className="text-white/60 text-xs">PVP S/IVA</div>
+                            <div className="text-lg font-semibold">{ars(mr.pvpSIVA)}</div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div className="bg-white/10 rounded-lg px-3 py-2">
+                            <div className="text-white/60 text-xs mb-0.5">Ganancia neta</div>
+                            <div className="text-xl font-bold">{ars(mr.ganancia)}</div>
+                          </div>
+                          <div className="bg-white/10 rounded-lg px-3 py-2">
+                            <div className="text-white/60 text-xs mb-0.5">Margen S/IVA</div>
+                            <div className="text-xl font-bold">{pct(mr.margen)}</div>
+                          </div>
+                        </div>
+                        <div className="border-t border-white/20 pt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-white/70">
+                          <div className="flex justify-between"><span>Costos fijos ML</span><span>− {ars(mr.cf)}</span></div>
+                          {mr.envioGratisActivo
+                            ? <div className="flex justify-between"><span>Envío gratis (absorbido)</span><span>− {ars(mr.k)}</span></div>
+                            : mr.buyerShipping
+                            ? <div className="flex justify-between"><span>Comisión variable</span><span>− {ars(mr.j)}</span></div>
+                            : <div className="flex justify-between"><span>Envío absorbido</span><span>− {ars(mr.k)}</span></div>
+                          }
+                          <div className="flex justify-between"><span>Imp. Déb y Créd</span><span>− {ars(mr.impDC)}</span></div>
+                          {meliCuotas>0 && (
+                            <div className="flex justify-between"><span>Cuotas ({meliCuotas}c)</span><span>− {ars(mr.pvpCIVA*cuotaRealPct/100)}</span></div>
+                          )}
+                          <div className="flex justify-between col-span-2 text-white/50 text-xs mt-0.5">
+                            <span>{meliME1 ? '📦 Envío ME1 (precio manual)' : mr.envioGratisActivo ? '🚚 Envío gratis ofrecido' : mr.buyerShipping ? '🟢 Envío a cargo del comprador' : '🟠 Envío a cargo del vendedor'}</span>
+                            <span>Sobre costo: {pct(pv(meliCosto) > 0 ? mr.ganancia / pv(meliCosto) : 0)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Puntos de equilibrio */}
+                  {meliOptRec && (
+                    <div className="bg-gradient-to-br from-violet-600 to-violet-700 text-white rounded-xl p-4 shadow-md">
+                      <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-3">
+                        ⚖️ Punto de equilibrio {meliOptRec.isME1 ? '— Envío ME1' : '(margen = 0%)'}
+                      </div>
+                      {meliOptRec.isME1 ? (
+                        <div className="space-y-2">
+                          <div className="bg-orange-500/30 border border-orange-300/40 rounded-lg px-3 py-2 mb-2">
+                            <div className="text-orange-200 text-xs font-medium">📦 Modo Envío ME1 activo</div>
+                            <div className="text-white/70 text-xs mt-0.5">Envío fijo: {ars(pv(meliPrecioME1))} · el comprador no paga envío</div>
+                          </div>
+                          <div className="bg-white/10 rounded-lg px-3 py-2.5">
+                            <div className="text-white/60 text-xs mb-1">Precio mínimo para no perder dinero</div>
+                            <div className="text-2xl font-bold">{ars(meliOptRec.be_sobre33)}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="bg-white/10 rounded-lg px-3 py-2.5">
+                            <div className="text-white/60 text-xs mb-1">PVP &lt; $33.000 · envío a cargo del cliente</div>
+                            {meliOptRec.be_bajo33 != null
+                              ? <div className="text-2xl font-bold">{ars(meliOptRec.be_bajo33)}</div>
+                              : <div className="text-sm font-semibold text-red-200">No alcanzable — el costo supera el límite del tramo</div>
+                            }
+                          </div>
+                          <div className="bg-white/10 rounded-lg px-3 py-2.5">
+                            <div className="text-white/60 text-xs mb-1">PVP ≥ $33.000 · envío a cargo del vendedor</div>
+                            <div className="text-2xl font-bold">{ars(meliOptRec.be_sobre33)}</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tabla de tramos */}
+                  {meliBrackets.length > 0 && (
+                    <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                      <div className="px-4 py-3 border-b border-slate-100">
+                        <h3 className="font-semibold text-slate-700 text-sm">📊 Rentabilidad por tramo de precio</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Costo compra S/IVA: {ars(pv(meliCosto))}{meliCuotas>0?` · Cuotas ${meliCuotas}c: −${fmt2(cuotaRealPct)}%`:''}</p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100">
+                              <th className="px-3 py-2 text-left text-slate-500 font-medium">Tramo / PVP C/IVA</th>
+                              <th className="px-3 py-2 text-right text-slate-500 font-medium">Ganancia</th>
+                              <th className="px-3 py-2 text-right text-slate-500 font-medium">Margen S/IVA</th>
+                              <th className="px-3 py-2 text-center text-slate-500 font-medium">Envío</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {meliBrackets.map((b, i) => (
+                              <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                                <td className="px-3 py-2.5">
+                                  <div className="font-medium text-slate-700">{b.label}</div>
+                                  <div className="text-slate-400 mt-0.5">PVP S/IVA: {ars(b.pvpSIVA)}</div>
+                                </td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={b.ganancia > 0 ? 'text-green-600 font-semibold' : 'text-red-500'}>
+                                    {ars(b.ganancia)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`px-1.5 py-0.5 rounded text-xs ${bracketColor(b.margen)}`}>
+                                    {pct(b.margen)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {b.envioGratisActivo ? (
+                                    <span className="text-blue-500 text-xs" title="Envío gratis ofrecido">🚚 Gratis ({ars(b.k)})</span>
+                                  ) : b.buyerShipping ? (
+                                    <span className="text-green-600 text-xs" title="El comprador paga el envío">🟢 Comprador</span>
+                                  ) : (
+                                    <span className="text-orange-500 text-xs" title="El vendedor absorbe el envío">{ars(b.k)}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100 text-xs text-slate-400">
+                        🟢 Comprador = el buyer paga el envío, no impacta al vendedor. Naranja = costo absorbido por el vendedor (S/IVA).
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Desglose comisiones */}
+                  <Collapsible title="📊 Desglose comisiones ML">
+                    <Row label="Comisión Categoría" value={`${fmt2(pv(p.mlComisionPct))}%`}/>
+                    <Row label="Publicidad" value={`${fmt2(pv(p.mlPublicidadPct))}%`}/>
+                    <Row label="IIBB" value={`${fmt2(pv(p.mlIIBBpct))}%`}/>
+                    <Row label="Varios" value={`${fmt2(pv(p.mlVariosPct))}%`}/>
+                    <Row bold label="Total CF ML" value={`${fmt2(mlCFpct)}%`} separator/>
+                    <Row label="Imp. Déb y Créd (sobre PVP C/IVA)" value={`${fmt2(pv(p.mlImpDebCredPct))}%`}/>
+                    {meliCuotas>0 && <>
+                      <Row label={`Costo cuotas (${meliCuotas}c)`} value={`${fmt2(cuotaRealPct)}%`} separator/>
+                      <Row label="Traslado adicional al comprador" value={`${fmt2(cuotaMarkupPct)}%`}/>
+                    </>}
+                  </Collapsible>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ══ COTIZADOR MELI INVERSO ══ */}
+          <div className="bg-white rounded-xl border-2 border-indigo-100 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="font-semibold text-slate-800">🔄 Cotizador MeLi Inverso</h2>
+              <span className="text-xs bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full">NUEVO</span>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">Ingresá el PVP de venta y la ganancia deseada — calculamos el FOB máximo a pagar en China.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* ── Inputs ── */}
+              <div className="space-y-3">
+
+                {/* Cuotas */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">💳 Modalidad de pago</label>
+                  <div className="flex bg-slate-100 rounded-lg p-1 gap-1 flex-wrap">
+                    {[0,3,6,9,12].map(c => (
+                      <button key={c} onClick={() => setInvCuotas(c)}
+                        className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-md transition-all min-w-max ${
+                          invCuotas===c ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        {c===0 ? 'Contado' : `${c} cuotas`}
+                      </button>
+                    ))}
+                  </div>
+                  {invCuotas>0 && (
+                    <div className="mt-2 bg-indigo-50 rounded-lg px-3 py-2 text-xs text-indigo-700 fade-in">
+                      📊 Costo real cuotas: <strong>{fmt2(invCuotaRealPct)}%</strong>
+                    </div>
+                  )}
+                </div>
+
+                <Field label="PVP de venta en MeLi (con IVA)" value={invPVP} onChange={setInvPVP} pre="ARS"/>
+                <Field label="Ganancia deseada" value={invMargen} onChange={setInvMargen} suf="%" hint="Dejar en 0 para ver solo el breakeven"/>
+
+                {/* Cantidad — propio del inverso, con fallback a Producto */}
+                <div>
+                  <Field label="Cantidad de unidades del lote"
+                    value={invCantidad} onChange={setInvCantidad}
+                    hint={pv(cantidad) > 0 && !pv(invCantidad) ? `Usando ${pv(cantidad)} uds del tab Producto` : ''}/>
+                  {!pv(invCantidad) && !pv(cantidad) && (
+                    <div className="mt-1 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">
+                      ⚠️ Ingresá la cantidad de unidades del lote para calcular el FOB.
+                    </div>
+                  )}
+                </div>
+
+                {/* Dimensiones */}
+                <div className="border-t border-slate-100 pt-3">
+                  <p className="text-xs font-medium text-slate-500 mb-2">📐 Dimensiones y peso (para calcular envío ML)</p>
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <Field small label="Largo" value={invLargo} onChange={setInvLargo} suf="cm"/>
+                    <Field small label="Ancho" value={invAncho} onChange={setInvAncho} suf="cm"/>
+                    <Field small label="Alto"  value={invAlto}  onChange={setInvAlto}  suf="cm"/>
+                  </div>
+                  <Field label="Peso real" value={invPesoReal} onChange={setInvPesoReal} suf="kg"/>
+                  {invPesoVol > 0 && (
+                    <div className="bg-blue-50 rounded-lg px-3 py-2 mt-2 text-xs flex justify-between">
+                      <span className="text-slate-500">Peso cobrado ML</span>
+                      <span className="text-blue-700 font-bold">{kg(Math.max(pv(invPesoReal), invPesoVol))}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Config activa */}
+                <div className="bg-amber-50 rounded-lg px-3 py-2 text-xs text-amber-800">
+                  ⚙️ Config. activa: <span className="font-mono font-semibold">
+                    {invCantidadEfectiva > 0 ? invCantidadEfectiva : '—'} uds
+                    {' · '}{tipoEmbarque}
+                    {tipoEmbarque==='LCL'&&cbm ? ` · ${cbm} m³` : ''}
+                    {pv(p.subfacturarPct)>0 ? ` · Subfact. ${pv(p.subfacturarPct)}%` : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* ── Resultado ── */}
+              <div>
+                {(!invResult) ? (
+                  <div className="bg-slate-50 rounded-xl p-8 text-center text-slate-400 text-sm h-full flex flex-col items-center justify-center gap-2">
+                    <div className="text-4xl">🔄</div>
+                    <p>Ingresá el PVP{invCantidadEfectiva<=0?' y la cantidad':''}<br/>para ver el FOB objetivo</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+
+                    {/* FOB objetivo */}
+                    <div className={`rounded-xl p-4 shadow-md text-white bg-gradient-to-br ${invResult.fob_objetivo > 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600'}`}>
+                      <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">
+                        🎯 FOB máximo — {fmt2(invResult.targetMarginPct)}% de ganancia
+                      </div>
+                      <div className="text-4xl font-bold mb-1">
+                        {invResult.fob_objetivo > 0 ? usd(invResult.fob_objetivo) : 'No viable'}
+                      </div>
+                      {invResult.fob_objetivo > 0 && (
+                        <div className="text-white/75 text-xs">
+                          Ganancia esperada ≈ {ars(invResult.ganancia_objetivo)} / unidad
+                        </div>
+                      )}
+                      {invResult.fob_objetivo <= 0 && (
+                        <div className="text-white/80 text-xs mt-1">
+                          El PVP no alcanza para cubrir los costos fijos de importación + ML
+                        </div>
+                      )}
+                    </div>
+
+                    {/* FOB breakeven */}
+                    <div className={`rounded-xl p-4 shadow-md text-white bg-gradient-to-br ${invResult.fob_breakeven > 0 ? 'from-slate-600 to-slate-700' : 'from-red-700 to-red-800'}`}>
+                      <div className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">
+                        ⚖️ FOB breakeven — margen 0%
+                      </div>
+                      <div className="text-3xl font-bold mb-1">
+                        {invResult.fob_breakeven > 0 ? usd(invResult.fob_breakeven) : 'No viable'}
+                      </div>
+                      <div className="text-white/60 text-xs">
+                        {invResult.fob_breakeven > 0 ? 'Precio máximo en China para no perder dinero' : 'El PVP no cubre los costos fijos de importación'}
+                      </div>
+                    </div>
+
+                    {/* Desglose del ingreso */}
+                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-1.5">
+                      <div className="font-semibold text-slate-700 mb-2">Desglose de ingresos a {ars(invResult.pvpCIVA)}</div>
+                      <div className="flex justify-between text-slate-500">
+                        <span>PVP sin IVA</span>
+                        <span className="font-medium text-slate-700">{ars(invResult.pvpSIVA)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500">
+                        <span>− Comisiones fijas ML ({fmt2(mlCFpct)}%)</span>
+                        <span className="text-red-500">− {ars(invResult.cf)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500">
+                        <span>{invResult.envioChico ? '− Comisión variable (cargo vendedor)' : '− Envío absorbido (vendedor)'}</span>
+                        <span className="text-red-500">− {ars(invResult.envio)}</span>
+                      </div>
+                      {invCuotas > 0 && (
+                        <div className="flex justify-between text-slate-500">
+                          <span>− Cuotas ({invCuotas}c, {fmt2(invCuotaRealPct)}%)</span>
+                          <span className="text-red-500">− {ars(invResult.cuotaCost)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-slate-500">
+                        <span>− Imp. Déb y Créd (1,2%)</span>
+                        <span className="text-red-500">− {ars(invResult.impDC)}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-slate-200 pt-1.5 font-semibold text-slate-700">
+                        <span>= Ingreso neto disponible</span>
+                        <span className="text-emerald-600">{ars(invResult.ingreso_neto)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400 pt-0.5">
+                        <span>Costos fijos import. sin FOB ({invCantidadEfectiva} uds)</span>
+                        <span>{ars(invResult.B)}</span>
+                      </div>
+                      <div className="text-slate-400 italic pt-0.5">
+                        {invResult.envioChico ? '🟢 Envío: lo paga el comprador' : '🟠 Envío: lo absorbe el vendedor'}
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ══ COTIZACIONES TAB ══ */}
+      {tab==='cotizaciones' && (
+        <div className="max-w-5xl mx-auto w-full p-4 space-y-4">
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+            <h2 className="font-semibold text-slate-800 mb-3">📚 Cotizaciones guardadas</h2>
+            <div className="flex rounded-lg overflow-hidden border border-slate-200 bg-white focus-within:border-indigo-400 transition-all">
+              <span className="px-3 py-2 bg-slate-50 text-slate-400 text-xs border-r border-slate-200">🔍</span>
+              <input type="text" placeholder="Buscar por nombre…" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm outline-none text-slate-800"/>
+            </div>
+          </div>
+
+          {cotizaciones.length===0 && (
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-8 text-center text-slate-400 text-sm">
+              No hay cotizaciones guardadas todavía
+            </div>
+          )}
+
+          {cotizaciones
+            .filter(c => !searchQ || c.nombre.toLowerCase().includes(searchQ.toLowerCase()))
+            .map(c => (
+              <div key={c.id} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                <button onClick={() => setExpandCotiz(expandCotiz===c.id ? null : c.id)}
+                  className="flex justify-between items-center w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <span className="font-semibold text-slate-800 text-sm">{c.nombre}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.tipoEmbarque==='FCL'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700'}`}>
+                          {c.tipoEmbarque||'—'}
+                        </span>
+                        <span className="text-xs text-slate-400">{c.fecha}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {c.costoSinFisc && <span className="font-bold text-indigo-700 text-sm">{ars(c.costoSinFisc)}</span>}
+                    <button onClick={e=>{e.stopPropagation();deleteCotiz(c.id)}}
+                      className="text-xs text-slate-300 hover:text-red-400 transition-colors px-1">🗑️</button>
+                    <span className="text-slate-400 text-xs">{expandCotiz===c.id?'▲':'▼'}</span>
+                  </div>
+                </button>
+                {expandCotiz===c.id && (
+                  <div className="px-4 pb-4 fade-in border-t border-slate-100 pt-3">
+                    <div className="grid grid-cols-2 gap-x-4 text-sm mb-3">
+                      <Row label="Precio unit." value={usd(pv(c.precioUnit))}/>
+                      <Row label="Cantidad" value={`${c.cantidad} u`}/>
+                      <Row label="Tipo precio" value={c.tipoPrecio||'—'}/>
+                      <Row label="Embarque" value={c.tipoEmbarque||'—'}/>
+                      {c.cbm && <Row label="CBM" value={`${c.cbm} m³`}/>}
+                      {c.pesoCargaTotal && <Row label="Peso carga" value={`${c.pesoCargaTotal} kg`}/>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-indigo-50 rounded-lg p-3">
+                        <p className="text-xs text-indigo-500 font-medium">Costo unit. (sin créd.)</p>
+                        <p className="text-lg font-bold text-indigo-800">{ars(c.costoSinFisc||0)}</p>
+                        <p className="text-xs text-indigo-400">{usd(c.costoSinFiscUSD||0)}</p>
+                      </div>
+                      <div className="bg-slate-50 rounded-lg p-3">
+                        <p className="text-xs text-slate-500 font-medium">Costo unit. (total)</p>
+                        <p className="text-lg font-bold text-slate-800">{ars(c.costoTotalARS||0)}</p>
+                        <p className="text-xs text-slate-400">{usd(c.costoUnitUSD||0)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          }
+        </div>
+      )}
+
+      {/* ══ PARÁMETROS TAB ══ */}
+      {tab==='params' && (
+        <div className="max-w-5xl mx-auto w-full p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Columna izquierda */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">🌐 General</h2>
+                <Field label="Tipo de cambio" value={p.tipoCambio} onChange={v=>upP('tipoCambio',v)} pre="ARS/USD"/>
+                <Field label="Subfacturación" value={p.subfacturarPct} onChange={v=>upP('subfacturarPct',v)} suf="%"/>
+                <Field label="Seguro flat (total embarque)" value={p.seguroFlat} onChange={v=>upP('seguroFlat',v)} pre="USD"/>
+                <Field label="Gastos EXW (flete China + aduana exp.)" value={p.gastosEXW} onChange={v=>upP('gastosEXW',v)} pre="USD"/>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">🚢 FCL — Flete y Terminal</h2>
+                <Field label="Flete FCL (total embarque)" value={p.fleteFCL} onChange={v=>upP('fleteFCL',v)} pre="USD"/>
+                <Field label="Terminal Portuaria (+IVA 21%)" value={p.terminalPortuariaFCL} onChange={v=>upP('terminalPortuariaFCL',v)} pre="USD"/>
+
+                <SectionLabel>Gastos en Argentina FCL</SectionLabel>
+                <Field label="BUNKER/FAF/BAF (sin IVA, directo)" value={p.bunkerFAFBAF} onChange={v=>upP('bunkerFAFBAF',v)} pre="USD"/>
+                <Field label="Manejo de Documentación (+IVA 21%)" value={p.manejoDocFCL} onChange={v=>upP('manejoDocFCL',v)} pre="USD"/>
+                <Field label="THC (+IVA 21%)" value={p.thcFCL} onChange={v=>upP('thcFCL',v)} pre="USD"/>
+                <Field label="TOLL (+IVA 21%)" value={p.tollFCL} onChange={v=>upP('tollFCL',v)} pre="USD"/>
+                <Field label="HANDLING (+IVA 21%)" value={p.handlingFCL} onChange={v=>upP('handlingFCL',v)} pre="USD"/>
+                <Field label="DOC FEE (+IVA 21%)" value={p.docFeeFCL} onChange={v=>upP('docFeeFCL',v)} pre="USD"/>
+                <Field label="Honorarios despachante (+IVA 21%)" value={p.honorariosFCL} onChange={v=>upP('honorariosFCL',v)} pre="USD"/>
+                <Field label="Transporte nacional (+IVA 21%)" value={p.transporteNacFCL} onChange={v=>upP('transporteNacFCL',v)} pre="USD"/>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">📋 Aranceles de importación</h2>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field small label="DIE %" value={p.diePct} onChange={v=>upP('diePct',v)} suf="%"/>
+                  <Field small label="TE %" value={p.tePct} onChange={v=>upP('tePct',v)} suf="%"/>
+                  <Field small label="IVA importación %" value={p.ivaImportPct} onChange={v=>upP('ivaImportPct',v)} suf="%"/>
+                  <Field small label="IVA adicional %" value={p.ivaAdicionalPct} onChange={v=>upP('ivaAdicionalPct',v)} suf="%"/>
+                  <Field small label="Percep. IIGG %" value={p.percIIGGpct} onChange={v=>upP('percIIGGpct',v)} suf="%"/>
+                  <Field small label="Percep. IIBB %" value={p.percIIBBpct} onChange={v=>upP('percIIBBpct',v)} suf="%"/>
+                </div>
+              </div>
+            </div>
+
+            {/* Columna derecha */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">📦 LCL</h2>
+                <Field label="Costo por CBM" value={p.costoCBM} onChange={v=>upP('costoCBM',v)} pre="USD" suf="/m³"/>
+
+                <SectionLabel>Gastos locales (base s/IVA, se aplica +21%)</SectionLabel>
+                <Field label="Manejo de doc." value={p.manejoDocLCL} onChange={v=>upP('manejoDocLCL',v)} pre="USD"/>
+                <Field label="AGP (por tonelada)" value={p.agpLCL} onChange={v=>upP('agpLCL',v)} pre="USD" suf="/ton"/>
+                <Field label="Desconsolidación" value={p.desconsolidacionLCL} onChange={v=>upP('desconsolidacionLCL',v)} pre="USD"/>
+                <Field label="SIM" value={p.simLCL} onChange={v=>upP('simLCL',v)} pre="USD"/>
+                <Field label="Log fee" value={p.logFeeLCL} onChange={v=>upP('logFeeLCL',v)} pre="USD"/>
+
+                <SectionLabel>Depósito fiscal y verificación</SectionLabel>
+                <Field label="Depósito fiscal (+IVA 21%)" value={p.depositoFiscalLCL} onChange={v=>upP('depositoFiscalLCL',v)} pre="USD"/>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <input type="checkbox" id="verif-check" checked={!p.verificacionIncluidaLCL}
+                    onChange={e=>upPBool('verificacionIncluidaLCL',!e.target.checked)}
+                    className="w-4 h-4 accent-indigo-600 cursor-pointer"/>
+                  <label htmlFor="verif-check" className="text-xs font-medium text-slate-500 cursor-pointer">
+                    Verificación NO incluida (tiene costo adicional)
+                  </label>
+                </div>
+                {!p.verificacionIncluidaLCL && (
+                  <div className="fade-in">
+                    <Field label="Costo verificación (+IVA 21%)" value={p.costoVerificacionLCL}
+                      onChange={v=>upP('costoVerificacionLCL',v)} pre="USD"/>
+                  </div>
+                )}
+
+                <SectionLabel>Otros LCL</SectionLabel>
+                <Field label="Honorarios despachante (+IVA 21%)" value={p.honorariosLCL} onChange={v=>upP('honorariosLCL',v)} pre="USD"/>
+                <Field label="Transporte nacional (+IVA 21%)" value={p.transporteNacLCL} onChange={v=>upP('transporteNacLCL',v)} pre="USD"/>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+                <h2 className="font-semibold text-slate-800 mb-3">🛒 Mercado Libre</h2>
+                <SectionLabel>Comisión Categoría</SectionLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field small label="Comisión Categoría %" value={p.mlComisionPct} onChange={v=>upP('mlComisionPct',v)} suf="%"/>
+                  <Field small label="Publicidad %" value={p.mlPublicidadPct} onChange={v=>upP('mlPublicidadPct',v)} suf="%"/>
+                  <Field small label="IIBB %" value={p.mlIIBBpct} onChange={v=>upP('mlIIBBpct',v)} suf="%"/>
+                  <Field small label="Varios %" value={p.mlVariosPct} onChange={v=>upP('mlVariosPct',v)} suf="%"/>
+                </div>
+                <div className="bg-indigo-50 rounded-lg px-3 py-2 mt-1 text-xs text-indigo-700">
+                  Total CF ML: <strong>{fmt2(mlCFpct)}%</strong>
+                </div>
+
+                <SectionLabel>Impuestos adicionales</SectionLabel>
+                <Field small label="Imp. Déb y Créd %" value={p.mlImpDebCredPct} onChange={v=>upP('mlImpDebCredPct',v)} suf="% sobre PVP C/IVA"/>
+
+                <SectionLabel>Cuotas sin interés — costos reales</SectionLabel>
+                <div className="space-y-1.5">
+                  {[3,6,9,12].map(c => (
+                    <div key={c} className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 w-16 shrink-0">{c} cuotas</span>
+                      <div className="flex-1 flex rounded-lg overflow-hidden border border-slate-200 bg-white focus-within:border-indigo-400 transition-all">
+                        <input type="number" step="0.01"
+                          value={p[`cuotas${c}CostoReal`] ?? ''}
+                          onChange={e=>upP(`cuotas${c}CostoReal`,e.target.value)}
+                          className="flex-1 px-3 py-1.5 bg-white outline-none text-slate-800 text-xs"/>
+                        <span className="px-2 py-1.5 bg-slate-50 text-slate-400 text-xs border-l border-slate-200">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3">
+                  <Field label="Traslado adicional al comprador" value={p.cuotasTrasladoAdicional}
+                    onChange={v=>upP('cuotasTrasladoAdicional',v)} suf="% (todas las cuotas)"/>
+                </div>
+              </div>
+
+              <button
+                onClick={() => { if(window.confirm('¿Restaurar todos los parámetros por defecto?')) setP(DEFAULT_PARAMS); }}
+                className="w-full py-2.5 text-sm text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors font-medium">
+                🔄 Restaurar parámetros por defecto
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* SAVE MODAL */}
+      {showSave && r && (
+        <SaveModal
+          onSave={nombre => {
+            saveCotiz(nombre, {
+              precioUnit, cantidad, tipoPrecio, tipoEmbarque, cbm, pesoCargaTotal,
+              precioVenta, pesoReal,
+              cifUSD: r.cifUSD,
+              gastosAdicionalesUSD: r.gastosAdicionalesUSD,
+              totalAranceles: r.totalAranceles,
+              totalCredFisc: r.totalCredFisc,
+              costoTotalARS: r.costoTotalARS,
+              costoUnitUSD: r.costoUnitUSD,
+              costoSinFisc: r.costoSinFisc,
+              costoSinFiscUSD: r.costoSinFiscUSD,
+            });
+            setShowSave(false);
+          }}
+          onClose={() => setShowSave(false)}
+        />
+      )}
+
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
